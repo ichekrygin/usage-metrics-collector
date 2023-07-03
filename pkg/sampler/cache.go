@@ -17,14 +17,19 @@ package sampler
 import (
 	"container/ring"
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"time"
 
 	"github.com/containerd/containerd"
+	"github.com/google/cadvisor/client"
+	v1 "github.com/google/cadvisor/info/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/pointer"
+
 	"sigs.k8s.io/usage-metrics-collector/pkg/api/samplerserverv1alpha1"
+	"sigs.k8s.io/usage-metrics-collector/pkg/cadvisor"
 	commonlog "sigs.k8s.io/usage-metrics-collector/pkg/log"
 )
 
@@ -50,6 +55,9 @@ type sampleCache struct {
 	// useContainerMonitor use container monitor for metrics
 	UseContainerMonitor bool
 	ContainerdClient    *containerd.Client
+
+	UseCadvisorMonitor bool
+	cadvisorClient     *client.Client
 }
 
 // Start starts the cache reading from /sys/fs/cgroup
@@ -160,6 +168,41 @@ func (s *sampleCache) getAllSamples() (allSampleInstants, int) {
 	}
 	log.V(3).Info("returning samples", "count", len(all.containers))
 	return all, count
+}
+
+func (s *sampleCache) fetchCAdvisorSample(samples *sampleInstants) error {
+	if samples == nil {
+		return nil
+	}
+	containers, err := s.cadvisorClient.SubcontainersInfo("kubelet", &v1.ContainerInfoRequest{})
+	if err != nil {
+		return fmt.Errorf("failed to retrieve kubelet containers: %w", err)
+	}
+
+	for _, container := range containers {
+		// Assert pod containers.
+		key := ContainerKeyFromCAdvisorContainerInfo(container)
+		if key.PodUID == "" {
+			continue // Skip all non-pod containers.
+		}
+
+		// Assert containers for current samples.
+		sample, found := samples.containers[key]
+		if !found {
+			// Skip containers that are not found in provided samples.
+			continue
+		}
+
+		// Assert container with stats.
+		if len(container.Stats) == 0 {
+			continue // Skip all containers without stats.
+		}
+		// Use the most recent container stats values.
+		// TODO(ichekrygin): do we need to reassert stats order based on the ContainerStats.Timestamp?
+		//  cadvisor/metrics doesn't seem to do that.
+		sample.CAdvisorContainerStats = *container.Stats[0]
+	}
+	return nil
 }
 
 // fetchSample fetches a new Sample from containerd
@@ -323,6 +366,11 @@ func (s *sampleCache) metricToSample(
 	return sample
 }
 
+// TODO(ichekrygin) - what happens when last == sample? This could occur if/when
+//
+//	cgroups resource file was not updated between two consecutive fetches.
+//	Most of the sample metrics set/updated in this routine are derived using a variation of
+//	"new" - "old"!
 func (s *sampleCache) computeSampleDelta(last, sample *sampleInstant) {
 	if last.Time.IsZero() {
 		// only compute rate if the last sample was set
@@ -348,6 +396,8 @@ func (s *sampleCache) computeSampleDelta(last, sample *sampleInstant) {
 
 	sample.MemoryOOM = sample.CumulativeMemoryOOM - last.CumulativeMemoryOOM
 	sample.MemoryOOMKill = sample.CumulativeMemoryOOMKill - last.CumulativeMemoryOOMKill
+
+	sample.CAdvisorContainerStats = cadvisor.DeltaContainerStats(sample.CAdvisorContainerStats, last.CAdvisorContainerStats)
 }
 
 func (s *sampleCache) populateSummary(sr *sampleResult) {
@@ -366,6 +416,7 @@ func (s *sampleCache) populateSummary(sr *sampleResult) {
 	s.computeSampleDelta(&first, &sr.avg)
 
 	var mem, cpuCoresNanoSec, cpuThrottledUSec uint64
+	cadvisorContainerStats := v1.ContainerStats{}
 	var l uint64
 	for i := range sr.values {
 		if i == 0 && pointer.BoolDeref(s.metricsReader.DropFirstValue, false) {
@@ -377,6 +428,7 @@ func (s *sampleCache) populateSummary(sr *sampleResult) {
 		mem += v.MemoryBytes
 		cpuCoresNanoSec += v.CPUCoresNanoSec
 		cpuThrottledUSec += v.CPUThrottledUSec
+		cadvisorContainerStats = cadvisor.AddContainerStats(cadvisorContainerStats, v.CAdvisorContainerStats)
 	}
 
 	sr.avg.MemoryBytes = mem / l
@@ -395,6 +447,10 @@ func (s *sampleCache) populateSummary(sr *sampleResult) {
 		sr.avg.CPUThrottledUSec > s.metricsReader.MaxCPUCoresNanoSec ||
 		int64(sr.avg.CPUThrottledUSec) < s.metricsReader.MinCPUCoresNanoSec {
 		sr.avg.CPUThrottledUSec = cpuThrottledUSec / l
+	}
+
+	if len(sr.values) < s.Size || cadvisor.HasResetInContainerStats(sr.avg.CAdvisorContainerStats) {
+		sr.avg.CAdvisorContainerStats = cadvisor.DivideContainerStats(cadvisorContainerStats, l)
 	}
 }
 

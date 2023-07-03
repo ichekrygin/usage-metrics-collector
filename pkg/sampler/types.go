@@ -17,12 +17,15 @@ package sampler
 import (
 	"time"
 
+	cadvisorv1 "github.com/google/cadvisor/info/v1"
+
 	"sigs.k8s.io/usage-metrics-collector/pkg/api/samplerserverv1alpha1"
 )
 
 // ContainerKey is the key to a container running in a Pod
 type ContainerKey struct {
 	// ContainerID is the id of the container, and corresponds to the pod.status.containerStatuses.containerID
+	// TODO(ichekrygin): how is this different from the ContainerName?
 	ContainerID string
 	// PodUID is the uid of the pod the container is running in, and corresponds to the pod.metadata.uid, or for
 	// mirror pods the config.mirror annotation.
@@ -69,6 +72,9 @@ type sampleInstant struct {
 
 	// MemoryUsageLifetimeMaxBytes uint64
 	// MemoryLimitBytes            uint64
+
+	// CAdvisor stats
+	CAdvisorContainerStats cadvisorv1.ContainerStats
 }
 
 // ContainerMetricType identifies a type of metrics that corresponds to a specific cgroups file

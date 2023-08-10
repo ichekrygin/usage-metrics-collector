@@ -75,8 +75,8 @@ type sampleInstant struct {
 	// CAdvisor stats.
 	// Although, currently, we only collect and report network metrics,
 	// we [re]use ContainerStats as sample value holder since in the future
-	// we may chose to collect addition values (other than Network)
-	CAdvisorContainerStats cadvisorv1.ContainerStats
+	// we may choose to collect addition values (other than Network)
+	CAdvisorNetworkStats cadvisorv1.NetworkStats
 }
 
 // ContainerMetricType identifies a type of metrics that corresponds to a specific cgroups file

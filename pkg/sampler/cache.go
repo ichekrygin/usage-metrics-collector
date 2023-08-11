@@ -220,8 +220,6 @@ func fetchCAdvisorSample(client *client.Client, samples *sampleInstants) error {
 			log.V(5).Info("skipping container without stats")
 			continue // Skip all containers without stats.
 		}
-		// Use the most recent container stats values.
-		sample.CAdvisorContainerStats = *container.Stats[0]
 		samples.containers[key] = sample
 	}
 	return nil
@@ -422,57 +420,6 @@ func (s *sampleCache) computeSampleDelta(last, sample *sampleInstant) {
 	sample.MemoryOOMKill = sample.CumulativeMemoryOOMKill - last.CumulativeMemoryOOMKill
 }
 
-func populateCadvisorSummary(sr *sampleResult, dropFirstRecord bool) {
-	if sr == nil {
-		return
-	}
-	// Use networkSampleCount to track total sample count since not all samples may have cadvisor metrics.
-	var (
-		networkSamplesCount uint64
-		networkRxBytes      uint64
-		networkRxPackets    uint64
-		networkRxErrors     uint64
-		networkRxDropped    uint64
-		networkTxBytes      uint64
-		networkTxPackets    uint64
-		networkTxErrors     uint64
-		networkTxDropped    uint64
-	)
-
-	for i := range sr.values {
-		if i == 0 && dropFirstRecord {
-			// Skip the first record for consistency with the `populateSummary`.
-			continue
-		}
-		v := sr.values[i]
-
-		// Sum network metrics for all sample values, using stats.Timestamp value
-		// to detect missing stats values, since all CAdvisorContainerStats have Timestamp value > 0.
-		if v.CAdvisorContainerStats.Timestamp.Unix() > 0 {
-			networkSamplesCount++
-			networkRxBytes += v.CAdvisorContainerStats.Network.RxBytes
-			networkRxPackets += v.CAdvisorContainerStats.Network.RxPackets
-			networkRxErrors += v.CAdvisorContainerStats.Network.RxErrors
-			networkRxDropped += v.CAdvisorContainerStats.Network.RxDropped
-			networkTxBytes += v.CAdvisorContainerStats.Network.TxBytes
-			networkTxPackets += v.CAdvisorContainerStats.Network.TxPackets
-			networkTxErrors += v.CAdvisorContainerStats.Network.TxErrors
-			networkTxDropped += v.CAdvisorContainerStats.Network.TxDropped
-		}
-	}
-	// Follow the same suite as "MemoryBytes" for cadvisor metrics.
-	if networkSamplesCount > 0 {
-		sr.avg.CAdvisorContainerStats.Network.RxBytes = networkRxBytes / networkSamplesCount
-		sr.avg.CAdvisorContainerStats.Network.RxPackets = networkRxPackets / networkSamplesCount
-		sr.avg.CAdvisorContainerStats.Network.RxErrors = networkRxErrors / networkSamplesCount
-		sr.avg.CAdvisorContainerStats.Network.RxDropped = networkRxDropped / networkSamplesCount
-		sr.avg.CAdvisorContainerStats.Network.TxBytes = networkTxBytes / networkSamplesCount
-		sr.avg.CAdvisorContainerStats.Network.TxPackets = networkTxPackets / networkSamplesCount
-		sr.avg.CAdvisorContainerStats.Network.TxErrors = networkTxErrors / networkSamplesCount
-		sr.avg.CAdvisorContainerStats.Network.TxDropped = networkTxDropped / networkSamplesCount
-	}
-}
-
 func (s *sampleCache) populateSummary(sr *sampleResult) {
 	count := int64(len(sr.values))
 	if count < 2 {
@@ -522,8 +469,6 @@ func (s *sampleCache) populateSummary(sr *sampleResult) {
 		int64(sr.avg.CPUThrottledUSec) < s.metricsReader.MinCPUCoresNanoSec {
 		sr.avg.CPUThrottledUSec = cpuThrottledUSec / l
 	}
-
-	populateCadvisorSummary(sr, pointer.BoolDeref(s.metricsReader.DropFirstValue, false))
 }
 
 // getSeconds returns the number of seconds between 2 samples

@@ -56,7 +56,7 @@ message ListMetricsResponse {
 }
 
 message ContainerMetrics {
-  // nextID: 39
+  // nextID: 23
 
   string containerID = 1;
   string podUID = 2;
@@ -83,24 +83,6 @@ message ContainerMetrics {
   int64 avgCPUThrottledNanoSec = 20;
   int64 avgCPUPeriodsSec = 21;
   int64 avgCPUThrottledPeriodsSec = 22;
-
-  repeated int64 networkRxBytes = 23;
-  repeated int64 networkRxPackets = 24;
-  repeated int64 networkRxErrors = 25;
-  repeated int64 networkRxDropped = 26;
-  repeated int64 networkTxBytes = 27;
-  repeated int64 networkTxPackets = 28;
-  repeated int64 networkTxErrors = 29;
-  repeated int64 networkTxDropped = 30;
-
-  int64 avgNetworkRxBytes = 31;
-  int64 avgNetworkRxPackets = 32;
-  int64 avgNetworkRxErrors = 33;
-  int64 avgNetworkRxDropped = 34;
-  int64 avgNetworkTxBytes = 35;
-  int64 avgNetworkTxPackets = 36;
-  int64 avgNetworkTxErrors = 37;
-  int64 avgNetworkTxDropped = 38;
 }
 
 message NodeMetrics {
